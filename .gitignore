@@ -1,0 +1,30 @@
+# Hive runtime
+.hive/
+.hive
+
+# Eval artifacts
+run.log
+results.tsv
+
+# Rust build output (cargo + the prop-amm CLI's scratch dir)
+vendor/prop-amm-challenge/target/
+vendor/prop-amm-challenge/**/target/
+vendor/prop-amm-challenge/.build/
+.build/
+target/
+
+# OS / editor noise
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Secrets / env
+.env
+.env.*
+
+# Python noise (in case anyone scripts in Python here)
+__pycache__/
+*.pyc

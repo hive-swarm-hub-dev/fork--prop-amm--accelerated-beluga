@@ -1,0 +1,3 @@
+# No Python dependencies. eval/eval.sh shells out to the vendored prop-amm CLI
+# (Rust) built by prepare.sh; the only Python use is `python3 -c` for sampling a
+# random seed-start, which uses the standard library.

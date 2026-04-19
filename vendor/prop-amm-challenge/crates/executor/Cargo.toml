@@ -1,0 +1,9 @@
+[package]
+name = "prop-amm-executor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+prop-amm-shared = { workspace = true }
+solana_rbpf = { workspace = true }
+thiserror = { workspace = true }

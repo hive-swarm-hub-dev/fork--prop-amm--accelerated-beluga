@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shared",
+    "crates/executor",
+    "crates/sim",
+    "crates/cli",
+]
+# Programs are BPF-only, built via `cargo build-sbf`
+exclude = [
+    "programs/normalizer",
+    "programs/starter",
+    ".build",
+]
+
+[workspace.dependencies]
+prop-amm-shared = { path = "crates/shared" }
+prop-amm-executor = { path = "crates/executor" }
+prop-amm-sim = { path = "crates/sim" }
+solana_rbpf = "0.8"
+rayon = "1.10"
+rand = "0.8"
+rand_pcg = "0.3"
+rand_distr = "0.4"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+anyhow = "1"
+pinocchio = "0.7"
+libloading = "0.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

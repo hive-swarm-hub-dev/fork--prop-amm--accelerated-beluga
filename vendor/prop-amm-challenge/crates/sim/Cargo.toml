@@ -1,0 +1,14 @@
+[package]
+name = "prop-amm-sim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+prop-amm-shared = { workspace = true }
+prop-amm-executor = { workspace = true }
+rayon = { workspace = true }
+rand = { workspace = true }
+rand_pcg = { workspace = true }
+rand_distr = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }

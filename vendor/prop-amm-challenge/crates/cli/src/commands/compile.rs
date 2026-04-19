@@ -1,0 +1,262 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+
+const BUILD_RUNS_DIR: &str = ".build/runs";
+pub const NATIVE_SWAP_SYMBOL: &[u8] = b"__prop_amm_compute_swap_export";
+pub const NATIVE_AFTER_SWAP_SYMBOL: &[u8] = b"__prop_amm_after_swap_export";
+
+const CARGO_TOML: &str = r#"[package]
+name = "user_program"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+pinocchio = "0.7"
+wincode = { version = "0.4", default-features = false, features = ["derive"] }
+prop-amm-submission-sdk = { path = "../crates/submission-sdk" }
+
+[features]
+no-entrypoint = []
+"#;
+
+fn cargo_toml_with_sdk_path() -> String {
+    CARGO_TOML.replace(
+        "path = \"../crates/submission-sdk\"",
+        "path = \"../../../crates/submission-sdk\"",
+    )
+}
+
+pub fn ensure_build_dir(safe_source: &str) -> anyhow::Result<PathBuf> {
+    let mut hasher = DefaultHasher::new();
+    safe_source.hash(&mut hasher);
+    CARGO_TOML.hash(&mut hasher);
+    let build_key = format!("{:016x}", hasher.finish());
+
+    let build_dir = PathBuf::from(BUILD_RUNS_DIR).join(build_key);
+    std::fs::create_dir_all(build_dir.join("src"))?;
+
+    let cargo_toml = cargo_toml_with_sdk_path();
+    let cargo_path = build_dir.join("Cargo.toml");
+    let should_write = match std::fs::read_to_string(&cargo_path) {
+        Ok(existing) => existing != cargo_toml,
+        Err(_) => true,
+    };
+    if should_write {
+        std::fs::write(&cargo_path, cargo_toml)?;
+    }
+
+    let source_path = build_dir.join("src/lib.rs");
+    let source_bytes = safe_source.as_bytes();
+    let should_write_source = match std::fs::read(&source_path) {
+        Ok(existing) => existing != source_bytes,
+        Err(_) => true,
+    };
+    if should_write_source {
+        std::fs::write(source_path, source_bytes)?;
+    }
+
+    Ok(build_dir)
+}
+
+pub fn compile_native(rs_file: &str) -> anyhow::Result<PathBuf> {
+    let rs_path = Path::new(rs_file);
+    if !rs_path.exists() {
+        anyhow::bail!("File not found: {}", rs_file);
+    }
+
+    let safe_source = make_safe_submission_source(rs_path)?;
+    let build_dir = ensure_build_dir(&safe_source)?;
+
+    let status = Command::new("cargo")
+        .arg("build")
+        .arg("--release")
+        .arg("--manifest-path")
+        .arg(build_dir.join("Cargo.toml"))
+        .arg("--features")
+        .arg("no-entrypoint")
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("Native build failed");
+    }
+
+    find_native_lib(&build_dir)
+}
+
+pub fn compile_bpf(rs_file: &str) -> anyhow::Result<PathBuf> {
+    let rs_path = Path::new(rs_file);
+    if !rs_path.exists() {
+        anyhow::bail!("File not found: {}", rs_file);
+    }
+
+    let safe_source = make_safe_submission_source(rs_path)?;
+    let build_dir = ensure_build_dir(&safe_source)?;
+
+    let status = Command::new("cargo")
+        .arg("build-sbf")
+        .arg("--manifest-path")
+        .arg(build_dir.join("Cargo.toml"))
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("BPF build failed");
+    }
+
+    find_bpf_so(&build_dir)
+}
+
+fn find_native_lib(build_dir: &Path) -> anyhow::Result<PathBuf> {
+    let release_dir = build_dir.join("target").join("release");
+    let ext = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
+
+    if let Ok(entries) = std::fs::read_dir(&release_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("lib") && name.ends_with(ext) {
+                return Ok(entry.path());
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "No native library found in {}/target/release/",
+        build_dir.display()
+    )
+}
+
+fn make_safe_submission_source(rs_path: &Path) -> anyhow::Result<String> {
+    let source = std::fs::read_to_string(rs_path)?;
+    if source_contains_unsafe_keyword(&source)? {
+        anyhow::bail!(
+            "Unsafe Rust is not allowed in submissions. Remove all `unsafe` blocks/functions/keywords from your source."
+        );
+    }
+
+    let analysis = analyze_source(&source)?;
+    if !analysis.has_compute_swap {
+        anyhow::bail!("Submission must define `fn compute_swap(data: &[u8]) -> u64`.");
+    }
+
+    let mut safe_source = source;
+    safe_source.push('\n');
+    safe_source.push('\n');
+    safe_source.push_str(&native_shim_source(analysis.has_after_swap));
+
+    Ok(safe_source)
+}
+
+#[derive(Clone, Copy)]
+struct SourceAnalysis {
+    has_compute_swap: bool,
+    has_after_swap: bool,
+}
+
+fn analyze_source(source: &str) -> anyhow::Result<SourceAnalysis> {
+    let parsed = syn::parse_file(source)
+        .map_err(|e| anyhow::anyhow!("Failed to parse source for function checks: {}", e))?;
+
+    let mut has_compute_swap = false;
+    let mut has_after_swap = false;
+
+    for item in parsed.items {
+        if let syn::Item::Fn(item_fn) = item {
+            let name = item_fn.sig.ident.to_string();
+            if name == "compute_swap" {
+                has_compute_swap = true;
+            } else if name == "after_swap" {
+                has_after_swap = true;
+            }
+        }
+    }
+
+    Ok(SourceAnalysis {
+        has_compute_swap,
+        has_after_swap,
+    })
+}
+
+fn native_shim_source(has_after_swap: bool) -> String {
+    let after_swap_target = if has_after_swap {
+        "after_swap"
+    } else {
+        "__prop_amm_after_swap_noop"
+    };
+
+    format!(
+        r#"#[cfg(not(target_os = "solana"))]
+#[inline]
+fn __prop_amm_after_swap_noop(_data: &[u8], _storage: &mut [u8]) {{}}
+
+#[cfg(not(target_os = "solana"))]
+#[no_mangle]
+pub extern "C" fn __prop_amm_compute_swap_export(data: *const u8, len: usize) -> u64 {{
+    prop_amm_submission_sdk::ffi_compute_swap(data, len, compute_swap)
+}}
+
+#[cfg(not(target_os = "solana"))]
+#[no_mangle]
+pub extern "C" fn __prop_amm_after_swap_export(
+    data: *const u8,
+    data_len: usize,
+    storage: *mut u8,
+    storage_len: usize,
+) {{
+    prop_amm_submission_sdk::ffi_after_swap(
+        data,
+        data_len,
+        storage,
+        storage_len,
+        {},
+    );
+}}
+"#,
+        after_swap_target
+    )
+}
+
+fn source_contains_unsafe_keyword(source: &str) -> anyhow::Result<bool> {
+    let stream: proc_macro2::TokenStream = source
+        .parse()
+        .map_err(|e| anyhow::anyhow!("Failed to parse source for safety checks: {}", e))?;
+    Ok(token_stream_contains_unsafe(stream))
+}
+
+fn token_stream_contains_unsafe(stream: proc_macro2::TokenStream) -> bool {
+    stream.into_iter().any(token_tree_contains_unsafe)
+}
+
+fn token_tree_contains_unsafe(tree: proc_macro2::TokenTree) -> bool {
+    match tree {
+        proc_macro2::TokenTree::Ident(ident) => ident == "unsafe",
+        proc_macro2::TokenTree::Group(group) => token_stream_contains_unsafe(group.stream()),
+        _ => false,
+    }
+}
+
+fn find_bpf_so(build_dir: &Path) -> anyhow::Result<PathBuf> {
+    let deploy_dir = build_dir.join("target").join("deploy");
+
+    if let Ok(entries) = std::fs::read_dir(&deploy_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".so") {
+                return Ok(entry.path());
+            }
+        }
+    }
+
+    anyhow::bail!("No BPF .so found in {}/target/deploy/", build_dir.display())
+}

@@ -1,0 +1,203 @@
+use rayon::prelude::*;
+
+use prop_amm_executor::{AfterSwapFn, BpfProgram, SwapFn};
+use prop_amm_shared::config::{HyperparameterVariance, SimulationConfig};
+use prop_amm_shared::result::{BatchResult, SimResult};
+
+use crate::engine;
+
+fn default_configs(
+    n_sims: u32,
+    n_steps: u32,
+    seed_start: u64,
+    seed_stride: u64,
+) -> Vec<SimulationConfig> {
+    let variance = HyperparameterVariance::default();
+    let mut base = SimulationConfig::default();
+    base.n_steps = n_steps;
+
+    (0..n_sims)
+        .map(|i| {
+            variance.apply(
+                &base,
+                seed_start.wrapping_add((i as u64).wrapping_mul(seed_stride)),
+            )
+        })
+        .collect()
+}
+
+pub fn run_batch(
+    submission_program: BpfProgram,
+    normalizer_program: BpfProgram,
+    configs: Vec<SimulationConfig>,
+    n_workers: Option<usize>,
+) -> anyhow::Result<BatchResult> {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(n_workers.unwrap_or_else(|| rayon::current_num_threads().min(8)))
+        .build()?;
+
+    let results: Result<Vec<SimResult>, _> = pool.install(|| {
+        configs
+            .par_iter()
+            .map(|config| {
+                let sub = submission_program.clone();
+                let norm = normalizer_program.clone();
+                engine::run_simulation(sub, norm, config)
+            })
+            .collect()
+    });
+
+    Ok(BatchResult::from_results(results?))
+}
+
+pub fn run_batch_native(
+    submission_fn: SwapFn,
+    submission_after_swap: Option<AfterSwapFn>,
+    normalizer_fn: SwapFn,
+    normalizer_after_swap: Option<AfterSwapFn>,
+    configs: Vec<SimulationConfig>,
+    n_workers: Option<usize>,
+) -> anyhow::Result<BatchResult> {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(n_workers.unwrap_or_else(|| rayon::current_num_threads().min(8)))
+        .build()?;
+
+    let results: Result<Vec<SimResult>, _> = pool.install(|| {
+        configs
+            .par_iter()
+            .map(|config| {
+                engine::run_simulation_native(
+                    submission_fn,
+                    submission_after_swap,
+                    normalizer_fn,
+                    normalizer_after_swap,
+                    config,
+                )
+            })
+            .collect()
+    });
+
+    Ok(BatchResult::from_results(results?))
+}
+
+pub fn run_default_batch(
+    submission_program: BpfProgram,
+    normalizer_program: BpfProgram,
+    n_sims: u32,
+    n_steps: u32,
+    n_workers: Option<usize>,
+) -> anyhow::Result<BatchResult> {
+    let configs = default_configs(n_sims, n_steps, 0, 1);
+    run_batch(submission_program, normalizer_program, configs, n_workers)
+}
+
+pub fn run_default_batch_seeded(
+    submission_program: BpfProgram,
+    normalizer_program: BpfProgram,
+    n_sims: u32,
+    n_steps: u32,
+    n_workers: Option<usize>,
+    seed_start: u64,
+    seed_stride: u64,
+) -> anyhow::Result<BatchResult> {
+    let configs = default_configs(n_sims, n_steps, seed_start, seed_stride);
+    run_batch(submission_program, normalizer_program, configs, n_workers)
+}
+
+pub fn run_default_batch_mixed(
+    submission_program: BpfProgram,
+    normalizer_fn: SwapFn,
+    normalizer_after_swap: Option<AfterSwapFn>,
+    n_sims: u32,
+    n_steps: u32,
+    n_workers: Option<usize>,
+) -> anyhow::Result<BatchResult> {
+    let configs = default_configs(n_sims, n_steps, 0, 1);
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(n_workers.unwrap_or_else(|| rayon::current_num_threads().min(8)))
+        .build()?;
+
+    let results: Result<Vec<SimResult>, _> = pool.install(|| {
+        configs
+            .par_iter()
+            .map(|config| {
+                let sub = submission_program.clone();
+                engine::run_simulation_mixed(sub, normalizer_fn, normalizer_after_swap, config)
+            })
+            .collect()
+    });
+
+    Ok(BatchResult::from_results(results?))
+}
+
+pub fn run_default_batch_mixed_seeded(
+    submission_program: BpfProgram,
+    normalizer_fn: SwapFn,
+    normalizer_after_swap: Option<AfterSwapFn>,
+    n_sims: u32,
+    n_steps: u32,
+    n_workers: Option<usize>,
+    seed_start: u64,
+    seed_stride: u64,
+) -> anyhow::Result<BatchResult> {
+    let configs = default_configs(n_sims, n_steps, seed_start, seed_stride);
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(n_workers.unwrap_or_else(|| rayon::current_num_threads().min(8)))
+        .build()?;
+
+    let results: Result<Vec<SimResult>, _> = pool.install(|| {
+        configs
+            .par_iter()
+            .map(|config| {
+                let sub = submission_program.clone();
+                engine::run_simulation_mixed(sub, normalizer_fn, normalizer_after_swap, config)
+            })
+            .collect()
+    });
+
+    Ok(BatchResult::from_results(results?))
+}
+
+pub fn run_default_batch_native(
+    submission_fn: SwapFn,
+    submission_after_swap: Option<AfterSwapFn>,
+    normalizer_fn: SwapFn,
+    normalizer_after_swap: Option<AfterSwapFn>,
+    n_sims: u32,
+    n_steps: u32,
+    n_workers: Option<usize>,
+) -> anyhow::Result<BatchResult> {
+    let configs = default_configs(n_sims, n_steps, 0, 1);
+    run_batch_native(
+        submission_fn,
+        submission_after_swap,
+        normalizer_fn,
+        normalizer_after_swap,
+        configs,
+        n_workers,
+    )
+}
+
+pub fn run_default_batch_native_seeded(
+    submission_fn: SwapFn,
+    submission_after_swap: Option<AfterSwapFn>,
+    normalizer_fn: SwapFn,
+    normalizer_after_swap: Option<AfterSwapFn>,
+    n_sims: u32,
+    n_steps: u32,
+    n_workers: Option<usize>,
+    seed_start: u64,
+    seed_stride: u64,
+) -> anyhow::Result<BatchResult> {
+    let configs = default_configs(n_sims, n_steps, seed_start, seed_stride);
+    run_batch_native(
+        submission_fn,
+        submission_after_swap,
+        normalizer_fn,
+        normalizer_after_swap,
+        configs,
+        n_workers,
+    )
+}
