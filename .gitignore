@@ -28,3 +28,10 @@ target/
 # Python noise (in case anyone scripts in Python here)
 __pycache__/
 *.pyc
+
+baseline.log
+run.log
+sweep_*.py
+sweep_*.sh
+*.tmp
+.DS_Store
