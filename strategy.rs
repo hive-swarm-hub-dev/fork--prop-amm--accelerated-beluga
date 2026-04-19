@@ -1,11 +1,12 @@
 use pinocchio::{account_info::AccountInfo, entrypoint, pubkey::Pubkey, ProgramResult};
-use prop_amm_submission_sdk::{set_return_data_bytes, set_return_data_u64};
+use prop_amm_submission_sdk::{set_return_data_bytes, set_return_data_u64, set_storage};
 
 const NAME: &str = "My Strategy";
 const MODEL_USED: &str = "GPT-5.3-Codex"; // Use "None" for fully human-written submissions.
 const FEE_NUMERATOR: u128 = 9940;
 const FEE_DENOMINATOR: u128 = 10000;
 const STORAGE_SIZE: usize = 1024;
+const SKEW_MAX: i64 = 50_000;
 
 #[derive(wincode::SchemaRead)]
 struct ComputeSwapInstruction {
@@ -13,7 +14,7 @@ struct ComputeSwapInstruction {
     input_amount: u64,
     reserve_x: u64,
     reserve_y: u64,
-    _storage: [u8; STORAGE_SIZE],
+    storage: [u8; STORAGE_SIZE],
 }
 
 #[cfg(not(feature = "no-entrypoint"))]
@@ -34,9 +35,18 @@ pub fn process_instruction(
             let output = compute_swap(instruction_data);
             set_return_data_u64(output);
         }
-        // tag 2 = after_swap (no-op for starter)
+        // tag 2 = after_swap
         2 => {
-            // No storage updates needed for basic CFMM
+            if instruction_data.len() >= 26 {
+                let reserve_x = u64::from_le_bytes(instruction_data[18..26].try_into().unwrap_or([0u8; 8])) as i128;
+                let skew_ppm = ((reserve_x * 1_000_000 / 100) - 1_000_000)
+                    .clamp(-(SKEW_MAX as i128), SKEW_MAX as i128) as i64;
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&skew_ppm.to_le_bytes());
+                let mut storage_buf = [0u8; STORAGE_SIZE];
+                storage_buf[0..8].copy_from_slice(&buf);
+                set_storage(&storage_buf);
+            }
         }
         // tag 3 = get_name (for leaderboard display)
         3 => set_return_data_bytes(NAME.as_bytes()),
@@ -69,15 +79,20 @@ pub fn compute_swap(data: &[u8]) -> u64 {
 
     let k = reserve_x * reserve_y;
 
+    let skew_ppm = i64::from_le_bytes(decoded.storage[0..8].try_into().unwrap_or([0u8; 8]));
+    let skew_ppm = skew_ppm.clamp(-SKEW_MAX, SKEW_MAX);
+
     match side {
         0 => {
-            let net_y = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
+            let fee_num = FEE_NUMERATOR * ((1_000_000 - skew_ppm) as u128) / 1_000_000;
+            let net_y = input_amount * fee_num / FEE_DENOMINATOR;
             let new_ry = reserve_y + net_y;
             let k_div = (k + new_ry - 1) / new_ry;
             reserve_x.saturating_sub(k_div) as u64
         }
         1 => {
-            let net_x = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
+            let fee_num = FEE_NUMERATOR * ((1_000_000 + skew_ppm) as u128) / 1_000_000;
+            let net_x = input_amount * fee_num / FEE_DENOMINATOR;
             let new_rx = reserve_x + net_x;
             let k_div = (k + new_rx - 1) / new_rx;
             reserve_y.saturating_sub(k_div) as u64
