@@ -7,6 +7,10 @@ const FEE_NUMERATOR: u128 = 9940;
 const FEE_DENOMINATOR: u128 = 10000;
 const STORAGE_SIZE: usize = 1024;
 
+// Additive virtual reserve offsets (c=1, ratio-preserving: VIRT_Y/VIRT_X = 100)
+const VIRT_X_OFFSET: u128 = 100;
+const VIRT_Y_OFFSET: u128 = 10000;
+
 #[derive(wincode::SchemaRead)]
 struct ComputeSwapInstruction {
     side: u8,
@@ -67,20 +71,28 @@ pub fn compute_swap(data: &[u8]) -> u64 {
         return 0;
     }
 
-    let k = reserve_x * reserve_y;
+    let virt_x = reserve_x + VIRT_X_OFFSET;
+    let virt_y = reserve_y + VIRT_Y_OFFSET;
+    let virt_k = virt_x * virt_y;
 
     match side {
         0 => {
+            // User puts in Y, gets X out
             let net_y = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
-            let new_ry = reserve_y + net_y;
-            let k_div = (k + new_ry - 1) / new_ry;
-            reserve_x.saturating_sub(k_div) as u64
+            let new_virt_y = virt_y + net_y;
+            // ceil division to avoid over-paying user
+            let new_virt_x = (virt_k + new_virt_y - 1) / new_virt_y;
+            let delta = virt_x.saturating_sub(new_virt_x);
+            delta.min(reserve_x) as u64
         }
         1 => {
+            // User puts in X, gets Y out
             let net_x = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
-            let new_rx = reserve_x + net_x;
-            let k_div = (k + new_rx - 1) / new_rx;
-            reserve_y.saturating_sub(k_div) as u64
+            let new_virt_x = virt_x + net_x;
+            // ceil division to avoid over-paying user
+            let new_virt_y = (virt_k + new_virt_x - 1) / new_virt_x;
+            let delta = virt_y.saturating_sub(new_virt_y);
+            delta.min(reserve_y) as u64
         }
         _ => 0,
     }
