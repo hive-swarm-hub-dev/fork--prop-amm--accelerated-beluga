@@ -30,8 +30,9 @@ __pycache__/
 *.pyc
 
 baseline.log
-run.log
+run*.log
 sweep_*.py
 sweep_*.sh
+test_*.py
 *.tmp
 .DS_Store
