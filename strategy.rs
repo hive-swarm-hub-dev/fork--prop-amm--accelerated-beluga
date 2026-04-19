@@ -6,6 +6,7 @@ const MODEL_USED: &str = "GPT-5.3-Codex"; // Use "None" for fully human-written 
 const FEE_NUMERATOR: u128 = 9940;
 const FEE_DENOMINATOR: u128 = 10000;
 const STORAGE_SIZE: usize = 1024;
+const M: u128 = 3;
 
 #[derive(wincode::SchemaRead)]
 struct ComputeSwapInstruction {
@@ -34,10 +35,8 @@ pub fn process_instruction(
             let output = compute_swap(instruction_data);
             set_return_data_u64(output);
         }
-        // tag 2 = after_swap (no-op for starter)
-        2 => {
-            // No storage updates needed for basic CFMM
-        }
+        // tag 2 = after_swap (no-op for virtual-reserves)
+        2 => {}
         // tag 3 = get_name (for leaderboard display)
         3 => set_return_data_bytes(NAME.as_bytes()),
         // tag 4 = get_model_used (for metadata display)
@@ -67,20 +66,26 @@ pub fn compute_swap(data: &[u8]) -> u64 {
         return 0;
     }
 
-    let k = reserve_x * reserve_y;
-
     match side {
         0 => {
+            let virt_x = reserve_x * M;
+            let virt_y = reserve_y * M;
+            let virt_k = virt_x * virt_y;
             let net_y = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
-            let new_ry = reserve_y + net_y;
-            let k_div = (k + new_ry - 1) / new_ry;
-            reserve_x.saturating_sub(k_div) as u64
+            let new_virt_y = virt_y + net_y;
+            let new_virt_x = (virt_k + new_virt_y - 1) / new_virt_y;
+            let delta = virt_x.saturating_sub(new_virt_x);
+            delta.min(reserve_x) as u64
         }
         1 => {
+            let virt_x = reserve_x * M;
+            let virt_y = reserve_y * M;
+            let virt_k = virt_x * virt_y;
             let net_x = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
-            let new_rx = reserve_x + net_x;
-            let k_div = (k + new_rx - 1) / new_rx;
-            reserve_y.saturating_sub(k_div) as u64
+            let new_virt_x = virt_x + net_x;
+            let new_virt_y = (virt_k + new_virt_x - 1) / new_virt_x;
+            let delta = virt_y.saturating_sub(new_virt_y);
+            delta.min(reserve_y) as u64
         }
         _ => 0,
     }
