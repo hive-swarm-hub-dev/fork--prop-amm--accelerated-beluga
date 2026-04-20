@@ -47,7 +47,7 @@ fn fee_num_for(reserve_x: u128, reserve_y: u128, log_p_ref: i64, n: u32) -> u128
     let dev_q32 = (lr - log_p_ref).unsigned_abs() as u128;
     // Convert |Δ log2| to permille: dev_q32 * 1000 * ln(2) / 2^32 ≈ dev_q32 * 693 >> 32
     let permille = (dev_q32.saturating_mul(693)) >> 32;
-    let extra = (permille / 100).saturating_mul(30).min(150);
+    let extra = (permille / 100).saturating_mul(45).min(220);
     10000u128.saturating_sub(70).saturating_sub(extra)
 }
 
