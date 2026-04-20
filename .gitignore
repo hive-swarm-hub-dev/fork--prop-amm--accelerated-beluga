@@ -33,5 +33,10 @@ baseline.log
 run.log
 sweep_*.py
 sweep_*.sh
+run_variants.py
+run_variants.sh
+run_inv_imb.py
+run_local_search.sh
+local_search_results/
 *.tmp
 .DS_Store
