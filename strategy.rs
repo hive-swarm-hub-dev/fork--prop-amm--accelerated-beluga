@@ -2,9 +2,11 @@ use pinocchio::{account_info::AccountInfo, entrypoint, pubkey::Pubkey, ProgramRe
 use prop_amm_submission_sdk::{set_return_data_bytes, set_return_data_u64};
 
 const NAME: &str = "My Strategy";
-const MODEL_USED: &str = "GPT-5.3-Codex"; // Use "None" for fully human-written submissions.
-const FEE_NUMERATOR: u128 = 9940;
+const MODEL_USED: &str = "GPT-5.3-Codex";
 const FEE_DENOMINATOR: u128 = 10000;
+const BASE_FEE: u128 = 70;
+const REDUCTION_PER_10PCT: u128 = 30;
+const MIN_FEE: u128 = 30;
 const STORAGE_SIZE: usize = 1024;
 
 #[derive(wincode::SchemaRead)]
@@ -29,18 +31,12 @@ pub fn process_instruction(
     }
 
     match instruction_data[0] {
-        // tag 0 or 1 = compute_swap (side)
         0 | 1 => {
             let output = compute_swap(instruction_data);
             set_return_data_u64(output);
         }
-        // tag 2 = after_swap (no-op for starter)
-        2 => {
-            // No storage updates needed for basic CFMM
-        }
-        // tag 3 = get_name (for leaderboard display)
+        2 => {}
         3 => set_return_data_bytes(NAME.as_bytes()),
-        // tag 4 = get_model_used (for metadata display)
         4 => set_return_data_bytes(get_model_used().as_bytes()),
         _ => {}
     }
@@ -50,6 +46,15 @@ pub fn process_instruction(
 
 pub fn get_model_used() -> &'static str {
     MODEL_USED
+}
+
+fn fee_numerator_for(reserve_x: u128, reserve_y: u128) -> u128 {
+    let target_y = reserve_x.saturating_mul(100);
+    let diff = if target_y > reserve_y { target_y - reserve_y } else { reserve_y - target_y };
+    let imb_permille = if reserve_y == 0 { 0 } else { diff.saturating_mul(1000) / reserve_y };
+    let reduction = (imb_permille / 100).saturating_mul(REDUCTION_PER_10PCT);
+    let fee_bps = BASE_FEE.saturating_sub(reduction).max(MIN_FEE);
+    FEE_DENOMINATOR.saturating_sub(fee_bps)
 }
 
 pub fn compute_swap(data: &[u8]) -> u64 {
@@ -68,16 +73,17 @@ pub fn compute_swap(data: &[u8]) -> u64 {
     }
 
     let k = reserve_x * reserve_y;
+    let fee_num = fee_numerator_for(reserve_x, reserve_y);
 
     match side {
         0 => {
-            let net_y = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
+            let net_y = input_amount * fee_num / FEE_DENOMINATOR;
             let new_ry = reserve_y + net_y;
             let k_div = (k + new_ry - 1) / new_ry;
             reserve_x.saturating_sub(k_div) as u64
         }
         1 => {
-            let net_x = input_amount * FEE_NUMERATOR / FEE_DENOMINATOR;
+            let net_x = input_amount * fee_num / FEE_DENOMINATOR;
             let new_rx = reserve_x + net_x;
             let k_div = (k + new_rx - 1) / new_rx;
             reserve_y.saturating_sub(k_div) as u64
