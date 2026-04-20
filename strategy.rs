@@ -5,8 +5,8 @@ const NAME: &str = "My Strategy";
 const MODEL_USED: &str = "GPT-5.3-Codex"; // Use "None" for fully human-written submissions.
 const FEE_DENOMINATOR: u128 = 10000;
 const BASE_FEE: u128 = 70;
-const EXTRA_PER_10PCT: u128 = 30;
-const MAX_EXTRA: u128 = 150;
+const EXTRA_PER_10PCT: u128 = 15;
+const MAX_EXTRA: u128 = 60;
 const STORAGE_SIZE: usize = 1024;
 
 fn fee_num_for(reserve_x: u128, reserve_y: u128) -> u128 {
@@ -39,18 +39,12 @@ pub fn process_instruction(
     }
 
     match instruction_data[0] {
-        // tag 0 or 1 = compute_swap (side)
         0 | 1 => {
             let output = compute_swap(instruction_data);
             set_return_data_u64(output);
         }
-        // tag 2 = after_swap (no-op for starter)
-        2 => {
-            // No storage updates needed for basic CFMM
-        }
-        // tag 3 = get_name (for leaderboard display)
+        2 => {}
         3 => set_return_data_bytes(NAME.as_bytes()),
-        // tag 4 = get_model_used (for metadata display)
         4 => set_return_data_bytes(get_model_used().as_bytes()),
         _ => {}
     }
