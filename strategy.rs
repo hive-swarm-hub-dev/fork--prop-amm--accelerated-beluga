@@ -84,8 +84,8 @@ fn update_state(data: &[u8], storage: &mut [u8]) {
         lr
     } else {
         let cur = read_i64_le(&storage[0..8]);
-        // Slow EMA α = 1/256: only advance once per step.
-        if step > last_step { cur + ((lr - cur) >> 8) } else { cur }
+        // Slow EMA α = 1/128: only advance once per step.
+        if step > last_step { cur + ((lr - cur) >> 7) } else { cur }
     };
 
     write_i64_le(&mut storage[0..8], pref);
