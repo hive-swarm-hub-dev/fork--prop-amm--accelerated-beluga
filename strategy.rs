@@ -4,9 +4,9 @@ use prop_amm_submission_sdk::{set_return_data_bytes, set_return_data_u64};
 const NAME: &str = "My Strategy";
 const MODEL_USED: &str = "GPT-5.3-Codex"; // Use "None" for fully human-written submissions.
 const FEE_DENOMINATOR: u128 = 10000;
-const BASE_FEE: u128 = 70;
+const BASE_FEE: u128 = 75;
 const EXTRA_PER_10PCT: u128 = 30;
-const MAX_EXTRA: u128 = 150;
+const MAX_EXTRA: u128 = 200;
 const STORAGE_SIZE: usize = 1024;
 
 fn fee_num_for(reserve_x: u128, reserve_y: u128) -> u128 {
