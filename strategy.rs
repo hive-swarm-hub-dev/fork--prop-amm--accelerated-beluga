@@ -39,18 +39,12 @@ pub fn process_instruction(
     }
 
     match instruction_data[0] {
-        // tag 0 or 1 = compute_swap (side)
         0 | 1 => {
             let output = compute_swap(instruction_data);
             set_return_data_u64(output);
         }
-        // tag 2 = after_swap (no-op for starter)
-        2 => {
-            // No storage updates needed for basic CFMM
-        }
-        // tag 3 = get_name (for leaderboard display)
+        2 => {}
         3 => set_return_data_bytes(NAME.as_bytes()),
-        // tag 4 = get_model_used (for metadata display)
         4 => set_return_data_bytes(get_model_used().as_bytes()),
         _ => {}
     }
@@ -84,13 +78,13 @@ pub fn compute_swap(data: &[u8]) -> u64 {
         0 => {
             let net_y = input_amount * fee_num / FEE_DENOMINATOR;
             let new_ry = reserve_y + net_y;
-            let k_div = (k + new_ry - 1) / new_ry;
+            let k_div = k / new_ry;
             reserve_x.saturating_sub(k_div) as u64
         }
         1 => {
             let net_x = input_amount * fee_num / FEE_DENOMINATOR;
             let new_rx = reserve_x + net_x;
-            let k_div = (k + new_rx - 1) / new_rx;
+            let k_div = k / new_rx;
             reserve_y.saturating_sub(k_div) as u64
         }
         _ => 0,
