@@ -32,7 +32,7 @@ fn write_u32_le(b: &mut [u8], v: u32) {
     b[..4].copy_from_slice(&v.to_le_bytes());
 }
 
-fn fee_num_for(reserve_x: u128, reserve_y: u128, log_p_ref: i64, n: u32) -> u128 {
+fn fee_num_for(reserve_x: u128, reserve_y: u128, log_p_ref: i64, n: u32, side: u8) -> u128 {
     // During bootstrap (n < 16), fall back to G4's 100:1 target.
     if n < 16 {
         let target_y = reserve_x.saturating_mul(100);
@@ -44,11 +44,14 @@ fn fee_num_for(reserve_x: u128, reserve_y: u128, log_p_ref: i64, n: u32) -> u128
     let rx_u64 = reserve_x.min(u64::MAX as u128) as u64;
     let ry_u64 = reserve_y.min(u64::MAX as u128) as u64;
     let lr = ilog2_q32(ry_u64) - ilog2_q32(rx_u64);
-    let dev_q32 = (lr - log_p_ref).unsigned_abs() as u128;
-    // Convert |Δ log2| to permille: dev_q32 * 1000 * ln(2) / 2^32 ≈ dev_q32 * 693 >> 32
-    let permille = (dev_q32.saturating_mul(693)) >> 32;
-    let extra = (permille / 100).saturating_mul(30).min(150);
-    10000u128.saturating_sub(70).saturating_sub(extra)
+    let dev_signed: i64 = lr - log_p_ref;
+    let dev_abs = dev_signed.unsigned_abs() as u128;
+    let permille = dev_abs.saturating_mul(693) >> 32;
+    let sym_extra = (permille / 100).saturating_mul(15).min(75);
+    let adverse = (dev_signed > 0 && side == 1) || (dev_signed < 0 && side == 0);
+    let asym_extra = if adverse { (permille / 100).saturating_mul(30).min(150) } else { 0 };
+    let total_extra = (sym_extra + asym_extra).min(225);
+    10000u128.saturating_sub(70).saturating_sub(total_extra)
 }
 
 #[derive(wincode::SchemaRead)]
@@ -153,7 +156,7 @@ pub fn compute_swap(data: &[u8]) -> u64 {
 
     let log_p_ref = read_i64_le(&decoded._storage[0..8]);
     let n = read_u32_le(&decoded._storage[8..12]);
-    let fee_num = fee_num_for(reserve_x, reserve_y, log_p_ref, n);
+    let fee_num = fee_num_for(reserve_x, reserve_y, log_p_ref, n, side);
     let k = reserve_x * reserve_y;
 
     match side {
