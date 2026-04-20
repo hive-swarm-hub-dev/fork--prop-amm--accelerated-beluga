@@ -31,6 +31,8 @@ __pycache__/
 
 baseline.log
 run.log
+run_*.log
+run_flat_validation.py
 sweep_*.py
 sweep_*.sh
 run_variants.py
