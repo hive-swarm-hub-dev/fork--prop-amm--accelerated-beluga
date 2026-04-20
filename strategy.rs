@@ -12,7 +12,8 @@ const STORAGE_SIZE: usize = 1024;
 fn fee_num_for(reserve_x: u128, reserve_y: u128) -> u128 {
     let target_y = reserve_x.saturating_mul(100);
     let diff = if target_y > reserve_y { target_y - reserve_y } else { reserve_y - target_y };
-    let imb_permille = if reserve_y == 0 { 0 } else { diff.saturating_mul(1000) / reserve_y };
+    // Normalize by reserve_x (divided by 100 to account for the 100:1 target ratio)
+    let imb_permille = if reserve_x == 0 { 0 } else { diff.saturating_mul(1000) / reserve_x / 100 };
     let extra = (imb_permille / 100).saturating_mul(EXTRA_PER_10PCT).min(MAX_EXTRA);
     FEE_DENOMINATOR.saturating_sub(BASE_FEE).saturating_sub(extra)
 }
