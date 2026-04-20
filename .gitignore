@@ -37,6 +37,8 @@ run_variants.py
 run_variants.sh
 run_inv_imb.py
 run_local_search.sh
+run_flat_validation.py
+run_*.log
 local_search_results/
 *.tmp
 .DS_Store
