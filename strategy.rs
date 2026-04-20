@@ -5,15 +5,27 @@ const NAME: &str = "My Strategy";
 const MODEL_USED: &str = "GPT-5.3-Codex"; // Use "None" for fully human-written submissions.
 const FEE_DENOMINATOR: u128 = 10000;
 const BASE_FEE: u128 = 70;
-const EXTRA_PER_10PCT: u128 = 30;
-const MAX_EXTRA: u128 = 150;
+const EXTRA_PER_10PCT: u128 = 60;
+const MAX_EXTRA: u128 = 300;
 const STORAGE_SIZE: usize = 1024;
 
-fn fee_num_for(reserve_x: u128, reserve_y: u128) -> u128 {
+fn fee_num_for(side: u8, reserve_x: u128, reserve_y: u128) -> u128 {
     let target_y = reserve_x.saturating_mul(100);
-    let diff = if target_y > reserve_y { target_y - reserve_y } else { reserve_y - target_y };
+    let (is_long_x, diff) = if target_y > reserve_y {
+        (true, target_y - reserve_y)
+    } else {
+        (false, reserve_y - target_y)
+    };
     let imb_permille = if reserve_y == 0 { 0 } else { diff.saturating_mul(1000) / reserve_y };
-    let extra = (imb_permille / 100).saturating_mul(EXTRA_PER_10PCT).min(MAX_EXTRA);
+    let raw_extra = (imb_permille / 100).saturating_mul(EXTRA_PER_10PCT).min(MAX_EXTRA);
+
+    // Only widen the side arb will exploit
+    let extra = if (is_long_x && side == 0) || (!is_long_x && side == 1) {
+        raw_extra
+    } else {
+        0
+    };
+
     FEE_DENOMINATOR.saturating_sub(BASE_FEE).saturating_sub(extra)
 }
 
@@ -78,7 +90,7 @@ pub fn compute_swap(data: &[u8]) -> u64 {
     }
 
     let k = reserve_x * reserve_y;
-    let fee_num = fee_num_for(reserve_x, reserve_y);
+    let fee_num = fee_num_for(side, reserve_x, reserve_y);
 
     match side {
         0 => {
